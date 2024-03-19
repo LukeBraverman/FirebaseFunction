@@ -10,7 +10,7 @@ const {getFirestore} = require("firebase-admin/firestore");
 
 initializeApp();
 
-
+// NOTE: THIS FILE IS OUTDATED
 /*
 This helper function takes in an author ID and a author object to save in a connected firestore database.
  */
@@ -55,11 +55,12 @@ exports.seedData = onRequest(async (req, res) => {
 This is a test function to call when testing. It will add a fake book to the database.
 We will then beable to see if the functions below correctly react to a new book addition.
  */
-exports.addBookk = onRequest(async (req, res) => {
+exports.addBookR = onRequest(async (req, res) => {
     // Grab the text parameter.
     // Push the new message into Firestore using the Firebase Admin SDK.
+    const authorRef = db.doc('/authors/author2');
     const bookObj = {
-        authorIDs: ['/books/author2'],
+        authorIDs: [authorRef],
         title: 'It'
     }
     const addBook = await getFirestore()
@@ -76,6 +77,10 @@ exports.onBookAdd = onDocumentCreated("/books/{documentId}", async (event) => {
     const newlyAddedBook = event.data.data();
     // This will get the list of authors
     const listOfAuthorsFromAddedBook = newlyAddedBook.authorIDs;
+    console.log('Now References -> '+ listOfAuthorsFromAddedBook)
+    const firstRef = listOfAuthorsFromAddedBook[0];
+    console.log('FirstRef -> '+ firstRef)
+    return;
     // If there are no authors then return early
     if (!listOfAuthorsFromAddedBook || listOfAuthorsFromAddedBook.length === 0 ) return;
     // We can get the ID of the new book from the path variable on line 74 ("/books/{documentId}").

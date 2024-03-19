@@ -3,10 +3,10 @@ const {onDocumentUpdated,onDocumentCreated} = require("firebase-functions/v2/fir
 const admin = require('firebase-admin');
 const {initializeApp} = require("firebase-admin/app");
 const {getFirestore} = require("firebase-admin/firestore");
+const {onRequest} = require("firebase-functions/v2/https");
 
 initializeApp();
-
-
+const db = admin.firestore();
 const saveAuthorToDatabase = async (authorId, authorObjectToAdd ) => {
     await getFirestore()
         .collection("authors")
@@ -14,15 +14,58 @@ const saveAuthorToDatabase = async (authorId, authorObjectToAdd ) => {
         .set(authorObjectToAdd);
 }
 
-const getIdFromBackLink = (backLinkToUse) => {
-    let parts = backLinkToUse.split('/');
-    const idFromBackLink = parts[2];
-    return idFromBackLink;
+const getIdFromReference = (reference) => {
+    const idFromReference = reference._path.segments[1];
+    return idFromReference;
 }
+
+/*
+This is a test function to call at the start, when testing. It will add some fake author data to the database.
+ */
+exports.seedData = onRequest(async (req, res) => {
+    const authorObj = {
+        bookIDs: [],
+        full_name: 'Stephen King - THIS SHOULD BE THE OBJ RETURNED'
+    }
+
+    const bookObj = {
+        authorIDs: ['/authors/author1'],
+        title: 'Carrie'
+    }
+    const addAuthor = await getFirestore()
+        .collection("authors")
+        .doc('author1')
+        .set(authorObj);
+
+    res.json({result: `Data added to database.`});
+});
+/*
+This is a test function to call when testing. It will add a fake book to the database.
+We will then beable to see if the functions below correctly react to a new book addition.
+ */
+exports.addBook = onRequest(async (req, res) => {
+    // Grab the text parameter.
+    // Push the new message into Firestore using the Firebase Admin SDK.
+    const authorRef = db.doc('/authors/author2');
+    const authorRef2 = db.doc('/authors/author1');
+
+    const bookObj = {
+        authorIDs: [],
+        title: 'It'
+    }
+    const addBook = await getFirestore()
+        .collection("books")
+        .doc('book1')
+        .set(bookObj);
+    // Send back a message that we've successfully written the message
+    res.json({result: `New book added`});
+});
+
 
 exports.onBookAdd = onDocumentCreated("/books/{documentId}", async (event) => {
 
     const newlyAddedBook = event.data.data();
+
     const listOfAuthorsFromAddedBook = newlyAddedBook.authorIDs;
 
     if (!listOfAuthorsFromAddedBook || listOfAuthorsFromAddedBook.length === 0 ) return;
@@ -31,9 +74,11 @@ exports.onBookAdd = onDocumentCreated("/books/{documentId}", async (event) => {
 
     for (i = 0; i < listOfAuthorsFromAddedBook.length; i++)
     {
-        const authorBacklink = listOfAuthorsFromAddedBook[i];
+        // new code
+        const authorsReference = listOfAuthorsFromAddedBook[i];
 
-        let authorId = getIdFromBackLink(authorBacklink)
+        let authorId = getIdFromReference(authorsReference)
+        //
 
         const docSnapshot = await getFirestore()
             .collection('authors').doc(authorId).get()
@@ -42,9 +87,10 @@ exports.onBookAdd = onDocumentCreated("/books/{documentId}", async (event) => {
 
         let authorData = docSnapshot.data();
 
-        const newBookBacklink = '/books/' + idOfNewlyAddedBook
+        // new code
+        const newBookReference = db.doc('/books/' + idOfNewlyAddedBook);
 
-        authorData.bookIDs.push(newBookBacklink)
+        authorData.bookIDs.push(newBookReference)
 
         await saveAuthorToDatabase(authorId, authorData);
 
@@ -56,20 +102,24 @@ exports.onBookUpdate = onDocumentUpdated("/books/{documentId}", async (event) =>
     const idOfNewlyUpdatedBook =  event.params.documentId;
 
     const updatedBook = event.data.after.data();
-    const newAuthorIDs = updatedBook.authorIDs
+    const newAuthorRefs = updatedBook.authorIDs; // Assuming authorIDs are now Firebase document references
 
     const outdatedBook = event.data.before.data();
-    const oldAuthorIDs = outdatedBook.authorIDs
+    const oldAuthorRefs = outdatedBook.authorIDs; // Assuming authorIDs were previously string IDs
 
-    const authorsToRemove = oldAuthorIDs.filter(authorId => !newAuthorIDs.includes(authorId));
-    const authorsToAdd = newAuthorIDs.filter(authorId => !oldAuthorIDs.includes(authorId));
+    // Find authors to remove
+    const authorsToRemove = oldAuthorRefs.filter(oldRef => !newAuthorRefs.some(newRef => newRef.isEqual(oldRef)));
+
+    // Find authors to add
+    const authorsToAdd = newAuthorRefs.filter(newRef => !oldAuthorRefs.some(oldRef => oldRef.isEqual(newRef)));
 
     if (authorsToAdd.length !== 0)
     {
         for (i=0; i < authorsToAdd.length; i++)
         {
-            let authorBackLink = authorsToAdd[i];
-            let authorId = getIdFromBackLink(authorBackLink)
+            let authorReference = authorsToAdd[i];
+            // new code
+            let authorId = getIdFromReference(authorReference)
 
             const docSnapshot = await getFirestore()
                 .collection('authors').doc(authorId).get()
@@ -77,9 +127,11 @@ exports.onBookUpdate = onDocumentUpdated("/books/{documentId}", async (event) =>
             if (!docSnapshot || !docSnapshot.exists) return;
 
             let authorData = docSnapshot.data();
-            const newBookBacklink = '/books/' + idOfNewlyUpdatedBook
 
-            authorData.bookIDs.push(newBookBacklink)
+            // new code
+            const newBookReference = db.doc('/books/' + idOfNewlyUpdatedBook);
+
+            authorData.bookIDs.push(newBookReference)
 
             await saveAuthorToDatabase(authorId, authorData);
 
@@ -87,13 +139,15 @@ exports.onBookUpdate = onDocumentUpdated("/books/{documentId}", async (event) =>
     }
 
     if(authorsToRemove.length !== 0)
-    {
+    {            console.log('99 Decided to remove')
+
         for (i=0; i < authorsToRemove.length ; i++)
         {
 
-            let authorBackLink = authorsToRemove[i];
+            let authorReference = authorsToRemove[i];
 
-            let authorId = getIdFromBackLink(authorBackLink)
+            // new code
+            let authorId = getIdFromReference(authorReference)
 
             const docSnapshot = await getFirestore()
                 .collection('authors').doc(authorId).get()
@@ -101,9 +155,13 @@ exports.onBookUpdate = onDocumentUpdated("/books/{documentId}", async (event) =>
 
             let authorData = docSnapshot.data();
 
-            const bookBackLinkToRemove = '/books/' + idOfNewlyUpdatedBook
+            // new code
+            const docPathToRemove = '/books/' + idOfNewlyUpdatedBook;
 
-            authorData.bookIDs = authorData.bookIDs.filter(bookLink => bookLink !== bookBackLinkToRemove);
+            authorData.bookIDs = authorData.bookIDs.filter(bookLink => {
+                const restoredPath = '/books/' + getIdFromReference(bookLink)
+                return restoredPath !== docPathToRemove
+            });
 
             await saveAuthorToDatabase(authorId, authorData);
 
